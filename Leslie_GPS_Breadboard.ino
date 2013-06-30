@@ -143,9 +143,12 @@ void check_for_buttonpress()
     display.display();
     index = 0;        //set everything back to zero because it is as if we are turning it on for the first time
     data_index = false;
+    sentenceBegins = false;
     buttonpress = false;
+    segdist = 0;
     distance = 0;
     last_latitude = 0;
+    last_longitude = 0;
     attachInterrupt(0, button_press, LOW);
   }
 }
