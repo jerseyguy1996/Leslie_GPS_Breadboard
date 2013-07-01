@@ -146,7 +146,7 @@ void sleep()
   display.print("Stopping");
   display.display();
   delay(2000);
-  digitalWrite(A5, HIGH);
+  digitalWrite(A5, HIGH);  //turns off the GPS and Display
   sleep_enable();
   attachInterrupt(0, button_press, LOW);
   set_sleep_mode(SLEEP_MODE_PWR_DOWN);
@@ -158,7 +158,7 @@ void sleep()
   //code starts back up here after wake up
   Serial.println("I'm awake");
   sleep_disable();
-  digitalWrite(A5, LOW);
+  digitalWrite(A5, LOW);  //turns on the GPS and Display
   power_adc_enable();
   display.begin(SSD1306_SWITCHCAPVCC);
   display.clearDisplay();
@@ -177,7 +177,8 @@ void sleep()
   mode = 0;
 }
 
-
+//just to let the user know if the GPS is on and is transmitting valid data
+//Both last_data_received and last_valid_data timeout after two seconds.
 void check_GPS_Status()
 {
   if(timer(last_data_received))
@@ -207,12 +208,13 @@ void check_GPS_Status()
     }
   }
   
+  
   if(timer(last_valid_data))
   {
     if(data_valid)
     {
       //display things differently depending on whether we are 
-      //in startup or now
+      //in startup or running mode
       switch(mode)
       {
         case 1:
@@ -266,6 +268,7 @@ void check_GPS_Status()
   }
 }
 
+//if everything comes back kosher then we can calculate stats and update the display
 void check_for_updated_data()
 {
   if(checkforSentence()) 
@@ -313,7 +316,7 @@ void check_for_updated_data()
   }
 }
 
-
+//this just reads data in one character at a time until we have a complete sentence
 boolean checkforSentence()
 {
   char c;
@@ -347,7 +350,7 @@ boolean checkforSentence()
 }
 
 //function to break apart the NMEA strings into pieces that I can
-//handle
+//handle.  Each call returns a segment
 const char* mytok(char* pDst, const char* pSrc, char sep = ',')
 {
     while ( *pSrc )
@@ -398,19 +401,14 @@ boolean Process_message()
     ptr = mytok(EW, ptr); if(ptr == NULL) return false;
     ptr = mytok(Dummy, ptr); if(ptr == NULL) return false;
     ptr = mytok(satsUsed, ptr); if(ptr == NULL) return false;
-//    ptr = mytok(Dummy, ptr); if(ptr == NULL) return false;
-//    ptr = mytok(MSLalt, ptr); if(ptr == NULL) return false;
-//    ptr = mytok(Geoid, ptr); if(ptr == NULL) return false;
-//    //ptr = mytok(GeoUnits, ptr); if(ptr == NULL) {Serial.println("Out13"); return;}
-    
 
-
+    //I wait to do anything until we have 4 satellites in view.  3 could work as well
     if(atoi(satsUsed) < 4) return false;
     
-    
+    //Everything is done with fixed point math.  Floats didn't have the resolution
+    //I wanted.
     unsigned long multiplier = 1000000UL;
-//    const int mins = 60;
-//    unsigned long temp;
+
 
     
     latDegrees = (atoi(latit1))/100;  //isolate degrees
@@ -501,6 +499,7 @@ boolean Process_message()
 
   }
   
+  //we only run this once to get today's date which is in the RMC string
   if(strcmp(messageID, "GPRMC") == 0 && data_index == false)
   {
     char tempdate[7];
@@ -541,20 +540,8 @@ boolean Process_message()
   return false;
 }
 
-//void wakeup()
-//{
-  //data_index = false;
-  
 
-//}
-
-//void sleep()
-//{
-  //turn off gps
-  //turn off oled and sd card
-  //sleep processor
-//}  
-  
+//This is the ISR.  It just sets buttonpress so that the main loop can handle it
 void button_press()
 {
       sleep_disable();
@@ -562,6 +549,7 @@ void button_press()
       buttonpress = true;
 
 }
+
 
 //keep track of time and handle millis() rollover
 boolean timer(unsigned long timeout)
