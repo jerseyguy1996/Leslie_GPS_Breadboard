@@ -14,12 +14,13 @@
 
 byte index = 0;
 byte control = 2;
+byte mode = 3;
 unsigned long last_data_received = 0; //is the GPS transmitting
 boolean GPS_transmitting = false;
 unsigned long last_valid_data = 0; //is the GPS transmitting valid data
-boolean data_valid = false;
+boolean data_valid = true;  //this will be set to false on the first iteration
 boolean buttonpress = true;
-boolean last_button_press = false;
+unsigned long last_button_press = 0;
 char buffer[90];
 boolean sentenceBegins = false;
 boolean data_index = false; //use this to alternate between processing RMC or GGA messages
@@ -69,8 +70,10 @@ void setup() {
 
   Serial.begin(115200);
   mySerial.begin(9600);
-  digitalWrite(A5, HIGH);  //pin 28 on the PDIP
-  pinMode(A5, OUTPUT);   //On/Off control on the GPS
+  Serial.println("Turning on stuff");
+  //pinMode(A5, OUTPUT);   //On/Off control on the peripherals  
+  digitalWrite(A5, LOW);  //pin 28 on the PDIP
+  pinMode(A5, OUTPUT);   //On/Off control on the peripherals
   pinMode(2, INPUT);      //pin 4 on the PDIP
   digitalWrite(2, HIGH);//button control
   
@@ -80,81 +83,101 @@ void setup() {
   display.begin(SSD1306_SWITCHCAPVCC);
 
   display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(WHITE, BLACK);
-  display.setCursor(0,0);
-  display.print("GPS Off");
-  display.setCursor(70,0);
-  display.print("Invalid");
+//  display.setTextSize(1);
+//  display.setTextColor(WHITE, BLACK);
+//  display.setCursor(0,0);
+//  display.print("GPS Off");
+//  display.setCursor(70,0);
+//  display.print("Invalid");
   display.display();
-  attachInterrupt(0, button_press, LOW);
+  //attachInterrupt(0, button_press, LOW);
 
-  
+  //Serial.println("Setup Complete");
 }
 
 // the loop routine runs over and over again forever:
 void loop() 
 {
+
+
+  if(mode == 3) sleep();
+  
   check_for_buttonpress();
+  //Serial.println("Checking for ButtonPress");
   
   check_GPS_Status();
   
   check_for_updated_data();
+  
+
 }
 
 void check_for_buttonpress()
 {
   if(buttonpress)
   {
-    Serial.println("button pressed");
-    display.clearDisplay();
-    display.setCursor(0,16);
-    display.setTextSize(2);
-    display.print("Stopping");
-    display.display();
-    delay(2000);
-    digitalWrite(A5, HIGH);  turn off peripherals (A5 connected to the gate of a p-channel FET
-    sleep_enable();
-    attachInterrupt(0, button_press, LOW);  //ISR simply sets buttonpress to true
-    set_sleep_mode(SLEEP_MODE_PWR_DOWN);
-    power_adc_disable();
-    sleep_cpu();
-    
-    //code starts back up here after wake up
-    sleep_disable();
-    digitalWrite(A5, LOW);   //turn the peripherals back on
-    power_adc_enable();
-    display.begin(SSD1306_SWITCHCAPVCC);
-    display.clearDisplay();
-    display.setTextSize(2);
-    display.setTextColor(WHITE, BLACK);
-    display.setCursor(0,16);
-    display.print("Starting");
-    display.display();
-    delay(2000);
-    
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(WHITE, BLACK);
-    display.setCursor(0,0);
-    display.print("GPS Off");
-    display.setCursor(70,0);
-    display.print("Invalid");
-    display.display();
-    index = 0;        //set everything back to zero because it is as if we are turning it on for the first time
-    data_index = false;
-    sentenceBegins = false;
+    Serial.println("Button Pressed");
+    if((millis() - last_button_press) < 1000) //having trouble with bounce so setting really long
+    {
+      Serial.println("Ignored");
+      buttonpress = false;
+     //have to reenable interrupts here because the ISR disables them
+      attachInterrupt(0, button_press, FALLING);
+      return;  //we will let the switch debounce for 40 milliseconds
+    }
+    last_button_press = millis();
+    mode++;
     buttonpress = false;
-    segdist = 0;
-    distance = 0;
-    last_latitude = 0;
-    last_longitude = 0;
-    attachInterrupt(0, button_press, LOW);
+    attachInterrupt(0, button_press, FALLING);
+    Serial.print("Mode = ");
+    Serial.println(mode);
   }
+
 }
 
-//this just lets me know if I am receiving data from the GPS
-//and if the data is valid or not.
+
+void sleep()
+{
+  Serial.println("Sleeping");
+  display.clearDisplay();
+  display.setTextColor(WHITE, BLACK);
+  display.setCursor(0,16);
+  display.setTextSize(2);
+  display.print("Stopping");
+  display.display();
+  delay(2000);
+  digitalWrite(A5, HIGH);
+  sleep_enable();
+  attachInterrupt(0, button_press, LOW);
+  set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+  power_adc_disable();
+  Serial.println("I'm Asleep");
+  Serial.flush();
+  sleep_cpu();
+  
+  //code starts back up here after wake up
+  Serial.println("I'm awake");
+  sleep_disable();
+  digitalWrite(A5, LOW);
+  power_adc_enable();
+  display.begin(SSD1306_SWITCHCAPVCC);
+  display.clearDisplay();
+  display.setTextSize(2);
+  display.setTextColor(WHITE, BLACK);
+  display.setCursor(0,16);
+  display.print("Starting");
+  display.display();
+  delay(2000);
+
+  index = 0;
+  data_index = false;
+  data_valid = true;  //will be set to false on the first loop after wakeup
+  distance = 0;
+  //setting mode to 0 because when check_for_buttonpress runs it will increment it to 1
+  mode = 0;
+}
+
+
 void check_GPS_Status()
 {
   if(timer(last_data_received))
@@ -188,12 +211,29 @@ void check_GPS_Status()
   {
     if(data_valid)
     {
-      display.setTextSize(1);
-      display.setTextColor(WHITE, BLACK);
-      display.setCursor(70,0);
-      display.print("Invalid ");
-      display.display();
-      data_valid = false;
+      //display things differently depending on whether we are 
+      //in startup or now
+      switch(mode)
+      {
+        case 1:
+          display.clearDisplay();
+          display.setTextSize(1);
+          display.setTextColor(WHITE, BLACK);
+          display.setCursor(0,16);
+          display.print("Locating Satellites");
+          display.display();
+          data_valid = false;
+          break;
+        
+        case 2:
+          display.setTextSize(1);
+          display.setTextColor(WHITE, BLACK);
+          display.setCursor(70,0);
+          display.print("Invalid ");
+          display.display();
+          data_valid = false;
+          break;
+      }
     }
   }
   
@@ -202,17 +242,30 @@ void check_GPS_Status()
   {
     if(!data_valid)
     {
-      display.setTextSize(1);
-      display.setTextColor(WHITE, BLACK);
-      display.setCursor(70,0);
-      display.print("Valid    ");
-      display.display();
-      data_valid = true;
+      switch(mode)
+      {
+        case 1:
+          display.setTextSize(1);
+          display.setTextColor(WHITE, BLACK);
+          display.setCursor(0,16);             
+          display.print("GPS Ready :-)          ");
+          display.display();
+          data_valid = true;
+          break;
+        
+        case 2:
+          display.setTextSize(1);
+          display.setTextColor(WHITE, BLACK);
+          display.setCursor(70,0);
+          display.print("Valid      ");
+          display.display();
+          data_valid = true;
+          break;
+      }
     }
   }
 }
 
-//if we have the correct NMEA string we can go ahead and update the display
 void check_for_updated_data()
 {
   if(checkforSentence()) 
@@ -220,39 +273,47 @@ void check_for_updated_data()
     Serial.println(buffer);
     if(Process_message() && strcmp(messageID, "GPGGA") == 0)
     {
-      //if we go longer than 2 seconds without a valid fix then we will
-      //show this on the display
-      last_valid_data = millis() + 2000;
-      //display.clearDisplay();
-      display.setTextSize(2);
-      display.setTextColor(WHITE, BLACK);
-      display.setCursor(8,16);
-//      display.print("Lat = ");
-//      display.print(n_s);
-//      display.print(latDegrees/1000000UL);
-//      display.print(lat_fract);
-//      display.print(latFract);
-//      display.println("  ");
-//      display.print("Long = ");
-//      display.print(e_w);
-//      display.print(longDegrees/1000000UL);
-//      display.print(long_fract);
-//      display.print(longFract);
-//      display.println("  ");
-//      display.setCursor(0,24);
-//      display.print("Dist = ");
-      display.print(distance/10000);
-      display.print(dist_fract);
-      display.print(distance - ((distance/10000)*10000));
-      display.println("  ");
-      display.display();
+      //
+      if(mode == 2)
+      {
+        display.clearDisplay();
+        //we just cleared the display so we need to put the indicators on top again
+        display.setTextSize(1);
+        display.setTextColor(WHITE, BLACK);
+        display.setCursor(0,0);
+        display.print("GPS On");
+        display.setCursor(70,0);
+        display.print("Valid");
+        
+        //put the distance run on there
+        display.setTextSize(2);
+        display.setTextColor(WHITE, BLACK);
+        display.setCursor(8,16);
+  //      display.print("Lat = ");
+  //      display.print(n_s);
+  //      display.print(latDegrees/1000000UL);
+  //      display.print(lat_fract);
+  //      display.print(latFract);
+  //      display.println("  ");
+  //      display.print("Long = ");
+  //      display.print(e_w);
+  //      display.print(longDegrees/1000000UL);
+  //      display.print(long_fract);
+  //      display.print(longFract);
+  //      display.println("  ");
+  //      display.setCursor(0,24);
+  //      display.print("Dist = ");
+        display.print(distance/10000);
+        display.print(dist_fract);
+        display.print(distance - ((distance/10000)*10000));
+        display.println("  ");
+        display.display();
+      }
     }
   }
 }
 
 
-//just read in characters until we reach a $ sign.  Then start recording to
-//buffer[] until we reach a /r
 boolean checkforSentence()
 {
   char c;
@@ -346,7 +407,7 @@ boolean Process_message()
 
     if(atoi(satsUsed) < 4) return false;
     
-    //we use this to preserve resolution in our fixed point math
+    
     unsigned long multiplier = 1000000UL;
 //    const int mins = 60;
 //    unsigned long temp;
@@ -387,60 +448,51 @@ boolean Process_message()
 
     if(EW[0] == 'W') strcpy(e_w, "-");
     
-    //***********************
-    //calculate the distance
-    //***********************
-    
-    //if its the first valid reading just store it as last
-    if(last_latitude == 0)
+    if(mode == 2)
     {
-      last_latitude = latDegrees;
-      last_longitude = longDegrees;
-    }
-
-    if(!(last_latitude == 0)) //just check to make sure that it isn't the first reading
-    //calculate distance of segment
-    {
-      long temp = 0;
-      segdist = sqrt(pow(((latDegrees - last_latitude)*milesPerLat)/10000L,2) + pow(((longDegrees - last_longitude)*milesPerLong)/10000L,2));
-      
-      //this filters out some of the jitter/noise associated with GPS
-      //sure we could just make the resolution courser when doing our
-      //fixed point math but then I couldn't tell people that I can 
-      //calculate out the distance to 4 decimal places :-)
-      
-      if(segdist<100)
-      {
-        segdist = 0;
-      }
-      temp = segdist - ((segdist/10000) * 10000); //isolate the fractional amount
-      
-      //figure out how many zeros we need after the decimal
-      if(temp<10) {strcpy(segdist_fract, ".000");}
-      else if (temp<100) {strcpy(segdist_fract, ".00");}
-      else if (temp<1000) {strcpy(segdist_fract, ".0");}
-      else {strcpy(segdist_fract, ".");}
-      
-      distance+=segdist;
-      temp = 0;
-      temp = distance - ((distance/10000)*10000);
-      
-      //figure out how many zeros we need after the decimal
-      if(temp<10) {strcpy(dist_fract, ".000");}
-      else if (temp<100) {strcpy(dist_fract, ".00");}
-      else if (temp<1000) {strcpy(dist_fract, ".0");}
-      else {strcpy(dist_fract, ".");}
-      
-      if(!(segdist<100))
+      //calculate the distance
+      if(last_latitude == 0)
       {
         last_latitude = latDegrees;
         last_longitude = longDegrees;
       }
-
-      return true;
-
-
+  
+      if(!(last_latitude == 0)) //just check to make sure that it isn't the first reading
+      //calculate distance of segment
+      {
+        long temp = 0;
+        segdist = sqrt(pow(((latDegrees - last_latitude)*milesPerLat)/10000L,2) + pow(((longDegrees - last_longitude)*milesPerLong)/10000L,2));
+        if(segdist<100)
+        {
+          segdist = 0;
+        }
+        temp = segdist - ((segdist/10000) * 10000); //isolate the fractional amount
+        if(temp<10) {strcpy(segdist_fract, ".000");}
+        else if (temp<100) {strcpy(segdist_fract, ".00");}
+        else if (temp<1000) {strcpy(segdist_fract, ".0");}
+        else {strcpy(segdist_fract, ".");}
+        
+        distance+=segdist;
+        temp = 0;
+        temp = distance - ((distance/10000)*10000);
+        if(temp<10) {strcpy(dist_fract, ".000");}
+        else if (temp<100) {strcpy(dist_fract, ".00");}
+        else if (temp<1000) {strcpy(dist_fract, ".0");}
+        else {strcpy(dist_fract, ".");}
+        
+        if(!(segdist<100))
+        {
+          last_latitude = latDegrees;
+          last_longitude = longDegrees;
+        }
+  
+  
+  
+      }
     }
+    
+    last_valid_data = millis() + 2000;
+    return true;
     
     
     //add the segment distance to the total distance
@@ -483,6 +535,7 @@ boolean Process_message()
     date[8] = '\0';
     
     data_index = true; //We should have a valid date.  Now begin receiving GGA data
+    last_valid_data = millis() + 2000;
     return true;
   }
   return false;
