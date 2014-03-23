@@ -15,6 +15,8 @@
 byte index = 0;
 byte control = 2;
 byte mode = 3;
+unsigned long batteryTime = 0;
+unsigned long GPSStatusTime = 0;
 unsigned long last_data_received = 0; //is the GPS transmitting
 boolean GPS_transmitting = false;
 unsigned long last_valid_data = 0; //is the GPS transmitting valid data
@@ -50,11 +52,11 @@ const int milesPerLat = 6900; //length per degree of latitude is 69 miles
                                   //the GPS.
 
 //adafruit OLED stuff
-#define OLED_DC 16
-#define OLED_CS 18
-#define OLED_CLK 15
-#define OLED_MOSI 14
-#define OLED_RESET 17
+#define OLED_DC A2
+#define OLED_CS A4
+#define OLED_CLK A1
+#define OLED_MOSI A0
+#define OLED_RESET A3
 Adafruit_SSD1306 display(OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS);
 
 
@@ -68,7 +70,7 @@ SoftwareSerial mySerial(3,4);
 // the setup routine runs once when you press reset:
 void setup() {                
 
-  Serial.begin(115200);
+  Serial.begin(57600);
   mySerial.begin(9600);
   Serial.println("Turning on stuff");
   //pinMode(A5, OUTPUT);   //On/Off control on the peripherals  
@@ -105,9 +107,20 @@ void loop()
   check_for_buttonpress();
   //Serial.println("Checking for ButtonPress");
   
-  check_GPS_Status();
+  if(timer(GPSStatusTime))
+  {
+    check_GPS_Status();
+    GPSStatusTime = millis() + 5000;
+  }
+  
   
   check_for_updated_data();
+  
+  if(timer(batteryTime))
+  {
+    check_battery();
+    batteryTime = millis() + 5000;
+  }
   
 
 }
@@ -168,13 +181,20 @@ void sleep()
   display.print("Starting");
   display.display();
   delay(2000);
-
+  mySerial.println("$PMTK314,0,1,0,0,0,0,0,0,0,0,0,0,0,0*35");
+  last_latitude = 0;
+  last_longitude = 0;
   index = 0;
   data_index = false;
   data_valid = true;  //will be set to false on the first loop after wakeup
   distance = 0;
   //setting mode to 0 because when check_for_buttonpress runs it will increment it to 1
   mode = 0;
+  display.clearDisplay();
+  display.display();
+  //check_battery();
+  batteryTime = millis() + 1000;
+  GPSStatusTime = millis() + 1000;
 }
 
 //just to let the user know if the GPS is on and is transmitting valid data
@@ -183,42 +203,38 @@ void check_GPS_Status()
 {
   if(timer(last_data_received))
   {
-    if(GPS_transmitting)
-    {
+
       display.setTextSize(1);
       display.setTextColor(WHITE, BLACK);
       display.setCursor(0,0);
       display.print("GPS Off   ");
       display.display();
       GPS_transmitting = false;
-    }
+
   }
   
   else
   
   {
-    if(!GPS_transmitting)
-    {
+
       display.setTextSize(1);
       display.setTextColor(WHITE, BLACK);
       display.setCursor(0,0);
-      display.print("GPS On   ");
+      display.print("GPS On ");
       GPS_transmitting = true;
       display.display();
-    }
+
   }
   
   
   if(timer(last_valid_data))
   {
-    if(data_valid)
-    {
       //display things differently depending on whether we are 
       //in startup or running mode
       switch(mode)
       {
         case 1:
-          display.clearDisplay();
+          //display.clearDisplay();
           display.setTextSize(1);
           display.setTextColor(WHITE, BLACK);
           display.setCursor(0,16);
@@ -230,20 +246,18 @@ void check_GPS_Status()
         case 2:
           display.setTextSize(1);
           display.setTextColor(WHITE, BLACK);
-          display.setCursor(70,0);
+          display.setCursor(50,0);
           display.print("Invalid ");
           display.display();
           data_valid = false;
           break;
       }
-    }
+  
   }
   
   else
   
   {
-    if(!data_valid)
-    {
       switch(mode)
       {
         case 1:
@@ -258,13 +272,12 @@ void check_GPS_Status()
         case 2:
           display.setTextSize(1);
           display.setTextColor(WHITE, BLACK);
-          display.setCursor(70,0);
-          display.print("Valid      ");
+          display.setCursor(50,0);
+          display.print("Valid  ");
           display.display();
           data_valid = true;
           break;
       }
-    }
   }
 }
 
@@ -279,19 +292,19 @@ void check_for_updated_data()
       //
       if(mode == 2)
       {
-        display.clearDisplay();
+        //display.clearDisplay();
         //we just cleared the display so we need to put the indicators on top again
         display.setTextSize(1);
         display.setTextColor(WHITE, BLACK);
-        display.setCursor(0,0);
-        display.print("GPS On");
-        display.setCursor(70,0);
-        display.print("Valid");
+//        display.setCursor(0,0);
+//        display.print("GPS On");
+//        display.setCursor(50,0);
+//        display.print("Valid");
         
         //put the distance run on there
         display.setTextSize(2);
         display.setTextColor(WHITE, BLACK);
-        display.setCursor(8,16);
+        display.setCursor(0,16);
   //      display.print("Lat = ");
   //      display.print(n_s);
   //      display.print(latDegrees/1000000UL);
@@ -314,6 +327,25 @@ void check_for_updated_data()
       }
     }
   }
+}
+
+void check_battery()
+{ //298 is the difference in value between 980 (4.2V full charge)
+  //and 698 (3.0V empty charge).  We display the percent remaining.
+  
+  long b = 0;
+  for(int i = 0; i<10; i++)
+  {
+    b+=analogRead(A6);
+  }
+  b = b/10;
+  display.setTextSize(1);
+  display.setTextColor(WHITE, BLACK);
+  display.setCursor(100,0);
+  display.print(((b-698)*100)/272);
+  display.print(" ");
+  display.display();
+  Serial.println(b); 
 }
 
 //this just reads data in one character at a time until we have a complete sentence
@@ -534,6 +566,7 @@ boolean Process_message()
     date[8] = '\0';
     
     data_index = true; //We should have a valid date.  Now begin receiving GGA data
+    mySerial.println("$PMTK314,0,0,0,1,0,0,0,0,0,0,0,0,0,0*35");
     last_valid_data = millis() + 2000;
     return true;
   }
